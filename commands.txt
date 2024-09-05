@@ -1,0 +1,5 @@
+CREATE DATABASE TestDB
+USE TestDB
+ADD TABLE Users (id INT, name STRING, active BOOL)
+INSERT INTO Users (id, name, active) VALUES (1, John, true)
+INSERT INTO Users (id, name, active) VALUES (1, Andrew, true)
