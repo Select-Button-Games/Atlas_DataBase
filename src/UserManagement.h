@@ -3,6 +3,7 @@
 #include <openssl/evp.h>
 #include <openssl/aes.h>
 #include <openssl/rand.h>
+#include <openssl/sha.h>
 #include <string>
 #include <unordered_map>
 #include <fstream>
@@ -27,7 +28,6 @@ private:
     std::string decrypt(const std::string& ciphertext, const std::string& key);
     std::string generateKey(const std::string& password);
 };
-
 
 UserManagement::UserManagement(const std::string& userFile) : userFile(userFile) {
     loadUsers();
@@ -140,7 +140,10 @@ std::string UserManagement::decrypt(const std::string& ciphertext, const std::st
 }
 
 std::string UserManagement::generateKey(const std::string& password) {
-    return std::string(password.begin(), password.end());
+    unsigned char key[EVP_MAX_KEY_LENGTH];
+    const unsigned char* salt = reinterpret_cast<const unsigned char*>("salt"); // Use a proper salt in production
+    PKCS5_PBKDF2_HMAC_SHA1(password.c_str(), password.size(), salt, sizeof(salt), 10000, EVP_MAX_KEY_LENGTH, key);
+    return std::string(reinterpret_cast<char*>(key), EVP_MAX_KEY_LENGTH);
 }
 
 bool UserManagement::userDataExists() const {

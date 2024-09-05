@@ -38,6 +38,9 @@ public:
 
                     DataType columnType = column.type;
                     file.write(reinterpret_cast<const char*>(&columnType), sizeof(columnType));
+
+                    bool isPrimaryKey = column.isPrimaryKey;
+                    file.write(reinterpret_cast<const char*>(&isPrimaryKey), sizeof(isPrimaryKey));
                 }
 
                 // Write the number of rows
@@ -80,37 +83,54 @@ public:
         if (file.is_open()) {
             size_t numTables = 0;
             file.read(reinterpret_cast<char*>(&numTables), sizeof(numTables));
+            std::cout << "Number of tables: " << numTables << std::endl;
 
             for (size_t i = 0; i < numTables; ++i) {
                 // Read the table name
                 size_t tableNameSize = 0;
                 file.read(reinterpret_cast<char*>(&tableNameSize), sizeof(tableNameSize));
+                if (tableNameSize > 1000) { // Arbitrary large value check
+                    throw std::runtime_error("Invalid table name size.");
+                }
                 std::string tableName(tableNameSize, '\0');
                 file.read(&tableName[0], tableNameSize);
+                std::cout << "Table name: " << tableName << std::endl;
 
                 Table table(tableName);
 
                 // Read the number of columns
                 size_t numColumns = 0;
                 file.read(reinterpret_cast<char*>(&numColumns), sizeof(numColumns));
+                std::cout << "Number of columns: " << numColumns << std::endl;
 
                 for (size_t j = 0; j < numColumns; ++j) {
                     // Read each column's name
                     size_t columnNameSize = 0;
                     file.read(reinterpret_cast<char*>(&columnNameSize), sizeof(columnNameSize));
+                    if (columnNameSize > 1000) { // Arbitrary large value check
+                        throw std::runtime_error("Invalid column name size.");
+                    }
                     std::string columnName(columnNameSize, '\0');
                     file.read(&columnName[0], columnNameSize);
+                    std::cout << "Column name: " << columnName << std::endl;
 
                     // Read each column's type
                     DataType columnType;
                     file.read(reinterpret_cast<char*>(&columnType), sizeof(columnType));
+                    std::cout << "Column type: " << static_cast<int>(columnType) << std::endl;
 
-                    table.addColumn(Column(columnName, columnType));
+                    // Read primary key flag
+                    bool isPrimaryKey;
+                    file.read(reinterpret_cast<char*>(&isPrimaryKey), sizeof(isPrimaryKey));
+                    std::cout << "Is primary key: " << isPrimaryKey << std::endl;
+
+                    table.addColumn(Column(columnName, columnType, isPrimaryKey));
                 }
 
                 // Read the number of rows
                 size_t numRows = 0;
                 file.read(reinterpret_cast<char*>(&numRows), sizeof(numRows));
+                std::cout << "Number of rows: " << numRows << std::endl;
 
                 for (size_t k = 0; k < numRows; ++k) {
                     Row row;
@@ -123,6 +143,9 @@ public:
                         else if (column.type == DataType::STRING) {
                             size_t valueSize = 0;
                             file.read(reinterpret_cast<char*>(&valueSize), sizeof(valueSize));
+                            if (valueSize > 1000000) { // Arbitrary large value check
+                                throw std::runtime_error("Invalid string value size.");
+                            }
                             std::string strValue(valueSize, '\0');
                             file.read(&strValue[0], valueSize);
                             row.addData(column.name, strValue);
@@ -142,4 +165,5 @@ public:
         }
         return db;
     }
+
 };

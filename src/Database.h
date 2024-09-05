@@ -55,36 +55,51 @@ public:
         return {};
     }
 };
-
 // Column class that will describe our Columns within the database
 class Column {
 public:
     std::string name;
     DataType type;
+    bool isPrimaryKey; // Add this flag
 
-    Column(const std::string& name, DataType type) : name(name), type(type) {}
+    Column(const std::string& name, DataType type, bool isPrimaryKey = false)
+        : name(name), type(type), isPrimaryKey(isPrimaryKey) {}
 };
 
 // Table class that will describe our tables within the database
 class Table {
 public:
-    Table() {}
     std::string name;
     std::vector<Column> columns;
     std::vector<Row> rows;
 
+    // Default constructor
+    Table() = default;
+
+    // Parameterized constructor
     Table(const std::string& name) : name(name) {}
 
     void addColumn(const Column& column) {
+        // Ensure only one primary key
+        if (column.isPrimaryKey) {
+            for (const auto& col : columns) {
+                if (col.isPrimaryKey) {
+                    throw std::runtime_error("Table can only have one primary key.");
+                }
+            }
+        }
         columns.push_back(column);
     }
 
-    void addRow(const Row& row) {
-        rows.push_back(row);
-    }
+    void addRow(const Row& row);
 
-    std::vector<Row> getRows() const {
-        return rows;
+    const Column* getPrimaryKey() const {
+        for (const auto& column : columns) {
+            if (column.isPrimaryKey) {
+                return &column;
+            }
+        }
+        return nullptr;
     }
 
     const Column* getColumn(const std::string& columnName) const {
@@ -96,7 +111,6 @@ public:
         return nullptr;
     }
 };
-
 // Implementations of Database member functions
 void Database::addTable(const Table& table) {
     tables[table.name] = table;
@@ -136,3 +150,17 @@ public:
         return currentDatabase;
     }
 };
+
+
+void Table::addRow(const Row& row) {
+    const Column* primaryKey = getPrimaryKey();
+    if (primaryKey) {
+        auto primaryKeyValue = row.getData(primaryKey->name);
+        for (const auto& existingRow : rows) {
+            if (existingRow.getData(primaryKey->name) == primaryKeyValue) {
+                throw std::runtime_error("Duplicate primary key value.");
+            }
+        }
+    }
+    rows.push_back(row);
+}

@@ -26,24 +26,30 @@ bool QueryParser::executeCommand(const std::string& command) {
 
     std::cout << "Executing command: " << command << std::endl; // Debugging
 
-    if (std::regex_match(command, match, std::regex(R"(CREATE DATABASE (\w+))"))) {
-        return parseCreateDatabase(command);
-    }
+    try {
+        if (std::regex_match(command, match, std::regex(R"(CREATE DATABASE (\w+))"))) {
+            return parseCreateDatabase(command);
+        }
 
-    if (std::regex_match(command, match, std::regex(R"(USE (\w+))"))) {
-        return parseUseDatabase(command);
-    }
+        if (std::regex_match(command, match, std::regex(R"(USE (\w+))"))) {
+            return parseUseDatabase(command);
+        }
 
-    if (std::regex_match(command, match, std::regex(R"(ADD TABLE (\w+) \(([^)]+)\))"))) {
-        return parseAddTable(command);
-    }
+        if (std::regex_match(command, match, std::regex(R"(ADD TABLE (\w+) \(([^)]+)\))"))) {
+            return parseAddTable(command);
+        }
 
-    if (std::regex_match(command, match, std::regex(R"(INSERT INTO (\w+) \(([^)]+)\) VALUES \(([^)]+)\))"))) {
-        return parseInsertInto(command);
-    }
+        if (std::regex_match(command, match, std::regex(R"(INSERT INTO (\w+) \(([^)]+)\) VALUES \(([^)]+)\))"))) {
+            return parseInsertInto(command);
+        }
 
-    std::cout << "Command not recognized: " << command << std::endl; // Debugging
-    return false;
+        std::cout << "Command not recognized: " << command << std::endl; // Debugging
+        return false;
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Error executing command: " << e.what() << std::endl;
+        return false;
+    }
 }
 
 bool QueryParser::parseCreateDatabase(const std::string& command) {
@@ -65,7 +71,7 @@ bool QueryParser::parseUseDatabase(const std::string& command) {
 
 bool QueryParser::parseAddTable(const std::string& command) {
     if (!dbManager.getCurrentDatabase()) {
-        std::cout << "No database selected" << std::endl; // Debugging
+        std::cout << "No database selected" << std::endl;
         return false;
     }
 
@@ -73,7 +79,7 @@ bool QueryParser::parseAddTable(const std::string& command) {
     std::regex_match(command, match, std::regex(R"(ADD TABLE (\w+) \(([^)]+)\))"));
     std::string tableName = match[1];
     std::string columnDefs = match[2];
-    std::cout << "Adding table: " << tableName << " with columns: " << columnDefs << std::endl; // Debugging
+    std::cout << "Adding table: " << tableName << " with columns: " << columnDefs << std::endl;
     Table table(tableName);
 
     std::istringstream colStream(columnDefs);
@@ -81,18 +87,25 @@ bool QueryParser::parseAddTable(const std::string& command) {
     while (std::getline(colStream, colDef, ',')) {
         std::istringstream colDefStream(colDef);
         std::string colName, colType;
-        colDefStream >> colName >> colType; // Use >> to handle spaces correctly
+        bool isPrimaryKey = false;
+
+        colDefStream >> colName >> colType;
+        if (colType == "PRIMARY_KEY") {
+            colType = "INT"; // Assuming primary key is of type INT
+            isPrimaryKey = true;
+        }
+
         DataType type;
         if (colType == "INT") type = DataType::INT;
         else if (colType == "STRING") type = DataType::STRING;
         else if (colType == "BOOL") type = DataType::BOOL;
         else {
-            std::cout << "Unknown column type: " << colType << std::endl; // Debugging
+            std::cout << "Unknown column type: " << colType << std::endl;
             return false;
         }
 
-        std::cout << "Adding column: " << colName << " of type: " << colType << std::endl; // Debugging
-        table.addColumn(Column(colName, type));
+        std::cout << "Adding column: " << colName << " of type: " << colType << std::endl;
+        table.addColumn(Column(colName, type, isPrimaryKey));
     }
 
     dbManager.getCurrentDatabase()->addTable(table);
@@ -146,8 +159,13 @@ bool QueryParser::parseInsertInto(const std::string& command) {
         }
     }
 
-    table->addRow(row);
+    try {
+        table->addRow(row);
+    }
+    catch (const std::runtime_error& e) {
+        std::cout << "Error inserting row: " << e.what() << std::endl;
+        return false;
+    }
+
     return true;
 }
-
-
