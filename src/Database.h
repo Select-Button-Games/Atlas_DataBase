@@ -6,7 +6,7 @@
 #include <variant>
 #include <optional>
 #include <ctime> // Include for std::time_t
-
+#include "BTree.h"
 class DatabaseManager; // Forward declaration
 
 /////////////////////////////////////////////////////////////////////////////////
@@ -70,31 +70,111 @@ public:
     DataType type;
     bool isPrimaryKey;
     std::optional<ForeignKey> foreignKey;
+    std::unique_ptr<BTree<std::variant<int, std::string, bool, std::time_t, float, std::vector<uint8_t>>>> index;
+
+ 
+    Column() = default;
+
+    Column(const std::string& name, DataType type, bool isPrimaryKey = false, std::optional<ForeignKey> foreignKey = std::nullopt)
+        : name(name), type(type), isPrimaryKey(isPrimaryKey), foreignKey(foreignKey) {
+        if (isPrimaryKey) {
+            index = std::make_unique<BTree<std::variant<int, std::string, bool, std::time_t, float, std::vector<uint8_t>>>>(3); 
+        }
+    }
+
+   
+    Column(const Column& other)
+        : name(other.name), type(other.type), isPrimaryKey(other.isPrimaryKey), foreignKey(other.foreignKey) {
+        if (other.index) {
+            index = std::make_unique<BTree<std::variant<int, std::string, bool, std::time_t, float, std::vector<uint8_t>>>>(*other.index);
+        }
+    }
+
+   
+    Column& operator=(const Column& other) {
+        if (this == &other) {
+            return *this;
+        }
+        name = other.name;
+        type = other.type;
+        isPrimaryKey = other.isPrimaryKey;
+        foreignKey = other.foreignKey;
+        if (other.index) {
+            index = std::make_unique<BTree<std::variant<int, std::string, bool, std::time_t, float, std::vector<uint8_t>>>>(*other.index);
+        }
+        else {
+            index.reset();
+        }
+        return *this;
+    }
+
+ 
+    Column(Column&& other) noexcept = default;
+
+  
+    Column& operator=(Column&& other) noexcept = default;
 
     void setPrimaryKey(bool isPrimaryKey) {
-		this->isPrimaryKey = isPrimaryKey;
-	}
+        this->isPrimaryKey = isPrimaryKey;
+    }
 
     void setForeignKey(const std::string& refTable, const std::string& refColumn) {
         foreignKey = ForeignKey(refTable, refColumn);
     }
 
-    Column(const std::string& name, DataType type, bool isPrimaryKey = false, std::optional<ForeignKey> foreignKey = std::nullopt)
-        : name(name), type(type), isPrimaryKey(isPrimaryKey), foreignKey(foreignKey) {}
+    void addToIndex(const std::variant<int, std::string, bool, std::time_t, float, std::vector<uint8_t>>& value) {
+        if (index) {
+            index->insert(value);
+        }
+    }
 };
 
-// Table class that will describe our tables within the database
+
+
 class Table {
 public:
     std::string name;
     std::vector<Column> columns;
     std::vector<Row> rows;
+    std::unique_ptr<BTree<std::variant<int, std::string, bool, std::time_t, float, std::vector<uint8_t>>>> primaryKeyBTree;
 
-    // Default constructor
+  
     Table() = default;
 
-    // Parameterized constructor
+    
     Table(const std::string& name) : name(name) {}
+
+    Table(const Table& other)
+        : name(other.name), columns(other.columns), rows(other.rows) {
+        if (other.primaryKeyBTree) {
+            primaryKeyBTree = std::make_unique<BTree<std::variant<int, std::string, bool, std::time_t, float, std::vector<uint8_t>>>>(other.primaryKeyBTree->getDegree());
+            other.primaryKeyBTree->copyTo(*primaryKeyBTree);
+        }
+    }
+
+  
+    Table& operator=(const Table& other) {
+        if (this == &other) {
+            return *this;
+        }
+        name = other.name;
+        columns = other.columns;
+        rows = other.rows;
+        if (other.primaryKeyBTree) {
+            primaryKeyBTree = std::make_unique<BTree<std::variant<int, std::string, bool, std::time_t, float, std::vector<uint8_t>>>>(other.primaryKeyBTree->getDegree());
+            other.primaryKeyBTree->copyTo(*primaryKeyBTree);
+        }
+        else {
+            primaryKeyBTree.reset();
+        }
+        return *this;
+    }
+
+    // Move constructor
+    Table(Table&& other) noexcept = default;
+
+    // Move assignment operator
+    Table& operator=(Table&& other) noexcept = default;
 
     void addColumn(const Column& column) {
         // Ensure only one primary key
@@ -104,11 +184,13 @@ public:
                     throw std::runtime_error("Table can only have one primary key.");
                 }
             }
+          
+            primaryKeyBTree = std::make_unique<BTree<std::variant<int, std::string, bool, std::time_t, float, std::vector<uint8_t>>>>(3); 
         }
         columns.push_back(column);
     }
 
-    void addRow(const Row& row, DatabaseManager& dbManager); // Updated signature
+    void addRow(const Row& row, DatabaseManager& dbManager);
 
     const Column* getPrimaryKey() const {
         for (const auto& column : columns) {
@@ -125,11 +207,21 @@ public:
                 return &column;
             }
         }
-        return nullptr;
+        return nullptr; 
+    }
+    void deleteRow(const std::variant<int, std::string, bool, time_t, float, std::vector<uint8_t>>& primaryKey);
+    void updateRow(const std::variant<int, std::string, bool, time_t, float, std::vector<uint8_t>>& oldPrimaryKey, const Row& newRow);
+  
+    void setPrimaryKeyBTree(BTree<std::variant<int, std::string, bool, std::time_t, float, std::vector<uint8_t>>>* btree) {
+        primaryKeyBTree.reset(btree);
+    }
+
+    BTree<std::variant<int, std::string, bool, std::time_t, float, std::vector<uint8_t>>>* getPrimaryKeyBTree() const {
+        return primaryKeyBTree.get();
     }
 };
 
-// Implementations of Database member functions
+
 void Database::addTable(const Table& table) {
     tables[table.name] = table;
 }
@@ -169,16 +261,19 @@ public:
     }
 };
 
-void Table::addRow(const Row& row, DatabaseManager& dbManager) { // Updated signature
+
+
+void Table::addRow(const Row& row, DatabaseManager& dbManager) {
     const Column* primaryKey = getPrimaryKey();
     if (primaryKey) {
         auto primaryKeyValue = row.getData(primaryKey->name);
-        for (const auto& existingRow : rows) {
-            if (existingRow.getData(primaryKey->name) == primaryKeyValue) {
+        if (primaryKey->index) {
+            if (primaryKey->index->search(primaryKeyValue)) {
                 throw std::runtime_error("Duplicate primary key value.");
             }
         }
     }
+
     for (const auto& column : columns) {
         if (column.foreignKey) {
             const auto& fk = column.foreignKey.value();
@@ -206,4 +301,48 @@ void Table::addRow(const Row& row, DatabaseManager& dbManager) { // Updated sign
     }
 
     rows.push_back(row);
+    for (auto& column : columns) { 
+        auto value = row.getData(column.name);
+        if (column.index) {
+            column.addToIndex(value);
+        }
+    }
+}
+void Table::deleteRow(const std::variant<int, std::string, bool, time_t, float, std::vector<uint8_t>>& primaryKey) {
+    const Column* primaryKeyColumn = getPrimaryKey();
+    if (!primaryKeyColumn) {
+        throw std::runtime_error("Primary key column not found.");
+    }
+
+    auto it = std::find_if(rows.begin(), rows.end(), [&](const Row& row) {
+        return row.getData(primaryKeyColumn->name) == primaryKey;
+        });
+
+    if (it != rows.end()) {
+        primaryKeyBTree->remove(primaryKey);
+        rows.erase(it);
+    }
+    else {
+        throw std::runtime_error("Row with the given primary key not found");
+    }
+}
+
+void Table::updateRow(const std::variant<int, std::string, bool, time_t, float, std::vector<uint8_t>>& oldPrimaryKey, const Row& newRow) {
+    const Column* primaryKeyColumn = getPrimaryKey();
+    if (!primaryKeyColumn) {
+        throw std::runtime_error("Primary key column not found.");
+    }
+
+    auto it = std::find_if(rows.begin(), rows.end(), [&](const Row& row) {
+        return row.getData(primaryKeyColumn->name) == oldPrimaryKey;
+        });
+
+    if (it != rows.end()) {
+        primaryKeyBTree->remove(oldPrimaryKey);
+        *it = newRow;
+        primaryKeyBTree->insert(newRow.getData(primaryKeyColumn->name));
+    }
+    else {
+        throw std::runtime_error("Row with the given primary key not found");
+    }
 }
