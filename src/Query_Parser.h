@@ -5,6 +5,8 @@
 #include <regex>
 #include <sstream>
 #include <iostream> // Include for debugging
+#include <sstream>
+
 
 class QueryParser {
 public:
@@ -22,35 +24,48 @@ private:
 };
 
 bool QueryParser::executeCommand(const std::string& command) {
-    std::smatch match;
+    std::istringstream commandStream(command);
+    std::string singleCommand;
+    bool allCommandsSuccessful = true;
 
-    std::cout << "Executing command: " << command << std::endl; // Debugging
+    while (std::getline(commandStream, singleCommand, ';')) {
+        std::smatch match;
+        std::string trimmedCommand = std::regex_replace(singleCommand, std::regex("^ +| +$|( ) +"), "$1"); // Trim spaces
 
-    try {
-        if (std::regex_match(command, match, std::regex(R"(CREATE DATABASE (\w+))"))) {
-            return parseCreateDatabase(command);
+        std::cout << "Executing command: " << trimmedCommand << std::endl; // Debugging
+
+        try {
+            if (std::regex_match(trimmedCommand, match, std::regex(R"(CREATE DATABASE (\w+))"))) {
+                std::cout << "Matched CREATE DATABASE command." << std::endl; // Debugging
+                allCommandsSuccessful &= parseCreateDatabase(trimmedCommand);
+            }
+            else if (std::regex_match(trimmedCommand, match, std::regex(R"(USE (\w+))"))) {
+                std::cout << "Matched USE command." << std::endl; // Debugging
+                allCommandsSuccessful &= parseUseDatabase(trimmedCommand);
+            }
+            else if (std::regex_match(trimmedCommand, match, std::regex(R"(ADD TABLE (\w+) \((.*)\))"))) {
+                std::cout << "Matched ADD TABLE command." << std::endl; // Debugging
+                allCommandsSuccessful &= parseAddTable(trimmedCommand);
+            }
+            else if (std::regex_match(trimmedCommand, match, std::regex(R"(INSERT INTO (\w+) \(([^)]+)\) VALUES \(([^)]+)\))"))) {
+                std::cout << "Matched INSERT INTO command." << std::endl; // Debugging
+                allCommandsSuccessful &= parseInsertInto(trimmedCommand);
+            }
+            else {
+                std::cerr << "Command not recognized: " << trimmedCommand << std::endl; // Debugging
+                allCommandsSuccessful = false;
+            }
         }
-
-        if (std::regex_match(command, match, std::regex(R"(USE (\w+))"))) {
-            return parseUseDatabase(command);
+        catch (const std::exception& e) {
+            std::cerr << "Error executing command: " << e.what() << std::endl;
+            allCommandsSuccessful = false;
         }
-
-        if (std::regex_match(command, match, std::regex(R"(ADD TABLE (\w+) \(([^)]+)\))"))) {
-            return parseAddTable(command);
-        }
-
-        if (std::regex_match(command, match, std::regex(R"(INSERT INTO (\w+) \(([^)]+)\) VALUES \(([^)]+)\))"))) {
-            return parseInsertInto(command);
-        }
-
-        std::cout << "Command not recognized: " << command << std::endl; // Debugging
-        return false;
     }
-    catch (const std::exception& e) {
-        std::cerr << "Error executing command: " << e.what() << std::endl;
-        return false;
-    }
+
+    return allCommandsSuccessful;
 }
+
+
 
 bool QueryParser::parseCreateDatabase(const std::string& command) {
     std::smatch match;
@@ -69,46 +84,108 @@ bool QueryParser::parseUseDatabase(const std::string& command) {
     return dbManager.selectDatabase(dbName);
 }
 
+
 bool QueryParser::parseAddTable(const std::string& command) {
-    if (!dbManager.getCurrentDatabase()) {
-        std::cout << "No database selected" << std::endl;
+    std::smatch match;
+    // Regex to match the ADD TABLE command and capture table name and columns
+    std::regex addTableRegex(R"(ADD TABLE (\w+) \((.*)\))");
+
+    // Match the command against the regex
+    if (!std::regex_match(command, match, addTableRegex)) {
+        std::cerr << "Failed to parse ADD TABLE command: " << command << std::endl;
         return false;
     }
 
-    std::smatch match;
-    std::regex_match(command, match, std::regex(R"(ADD TABLE (\w+) \(([^)]+)\))"));
-    std::string tableName = match[1];
-    std::string columnDefs = match[2];
-    std::cout << "Adding table: " << tableName << " with columns: " << columnDefs << std::endl;
+    // Extract table name and column definitions
+    std::string tableName = match[1].str();
+    std::string columnsStr = match[2].str();
+
+    std::cout << "Adding table: " << tableName << " with columns: " << columnsStr << std::endl; // Debugging
+
     Table table(tableName);
+    std::istringstream columnsStream(columnsStr);
+    std::string columnDef;
 
-    std::istringstream colStream(columnDefs);
-    std::string colDef;
-    while (std::getline(colStream, colDef, ',')) {
-        std::istringstream colDefStream(colDef);
-        std::string colName, colType;
-        bool isPrimaryKey = false;
+    // Process each column definition
+    while (std::getline(columnsStream, columnDef, ',')) {
+        columnDef = std::regex_replace(columnDef, std::regex("^ +| +$|( ) +"), "$1"); // Trim spaces
 
-        colDefStream >> colName >> colType;
-        if (colType == "PRIMARY_KEY") {
-            colType = "INT"; // Assuming primary key is of type INT
-            isPrimaryKey = true;
+        std::smatch columnMatch;
+        // Regex to handle column definitions with possible attributes
+        std::regex columnRegex(R"((\w+)\s+(\w+)(.*))");
+
+        // Match the column definition to extract column name, type, and attributes
+        if (std::regex_match(columnDef, columnMatch, columnRegex)) {
+            std::string columnName = columnMatch[1].str();
+            std::string columnTypeStr = columnMatch[2].str();
+            std::string attributes = columnMatch[3].str();
+
+            std::cout << "Column definition: " << columnDef << std::endl; // Debugging
+            std::cout << "Column name: " << columnName << ", Type: " << columnTypeStr
+                << ", Attributes: " << attributes << std::endl; // Debugging
+
+            // Identify the column type
+            DataType columnType;
+            if (columnTypeStr == "INT") {
+                columnType = DataType::INT;
+            }
+            else if (columnTypeStr == "STRING") {
+                columnType = DataType::STRING;
+            }
+            else if (columnTypeStr == "BOOL") {
+                columnType = DataType::BOOL;
+            }
+            else if (columnTypeStr == "TIMESTAMP") {
+                columnType = DataType::TIMESTAMP;
+            }
+            else if (columnTypeStr == "FLOAT") {
+                columnType = DataType::FLOAT;
+            }
+            else if (columnTypeStr == "BLOB") {
+                columnType = DataType::BLOB;
+            }
+            else {
+                std::cerr << "Unknown column type: " << columnTypeStr << std::endl;
+                return false;
+            }
+
+            Column column(columnName, columnType);
+
+            // Check for PRIMARY_KEY attribute
+            if (attributes.find("PRIMARY_KEY") != std::string::npos) {
+                column.setPrimaryKey(true);
+                std::cout << "Column " << columnName << " is a primary key." << std::endl;
+            }
+
+            // Check for REFERENCES attribute (foreign key)
+            std::smatch referenceMatch;
+            std::regex referenceRegex(R"(REFERENCES\s+(\w+)\((\w+)\))");
+            if (std::regex_search(attributes, referenceMatch, referenceRegex)) {
+                std::string referencedTable = referenceMatch[1].str();
+                std::string referencedColumn = referenceMatch[2].str();
+                column.setForeignKey(referencedTable, referencedColumn);
+                std::cout << "Column " << columnName << " references "
+                    << referencedTable << "(" << referencedColumn << ")." << std::endl;
+            }
+
+            table.addColumn(column); // Add column to the table
         }
-
-        DataType type;
-        if (colType == "INT") type = DataType::INT;
-        else if (colType == "STRING") type = DataType::STRING;
-        else if (colType == "BOOL") type = DataType::BOOL;
         else {
-            std::cout << "Unknown column type: " << colType << std::endl;
+            std::cerr << "Failed to parse column definition: " << columnDef << std::endl;
             return false;
         }
-
-        std::cout << "Adding column: " << colName << " of type: " << colType << std::endl;
-        table.addColumn(Column(colName, type, isPrimaryKey));
     }
 
-    dbManager.getCurrentDatabase()->addTable(table);
+    // Attempt to add the table to the database
+    try {
+        dbManager.getCurrentDatabase()->addTable(table);
+        std::cout << "Table " << tableName << " successfully added to the database." << std::endl;
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Error adding table: " << e.what() << std::endl;
+        return false;
+    }
+
     return true;
 }
 
@@ -157,10 +234,20 @@ bool QueryParser::parseInsertInto(const std::string& command) {
         else if (column->type == DataType::BOOL) {
             row.addData(colName, value == "true");
         }
+        else if (column->type == DataType::TIMESTAMP) {
+            std::time_t timestamp = std::stoll(value);
+        }
+        else if (column->type == DataType::FLOAT) {
+            row.addData(colName, std::stof(value));
+        }
+        else if (column->type == DataType::BLOB) {
+            std::vector<uint8_t> blob(value.begin(), value.end());
+            row.addData(colName, blob);
+        }
     }
 
     try {
-        table->addRow(row);
+        table->addRow(row, dbManager);
     }
     catch (const std::runtime_error& e) {
         std::cout << "Error inserting row: " << e.what() << std::endl;
@@ -169,3 +256,4 @@ bool QueryParser::parseInsertInto(const std::string& command) {
 
     return true;
 }
+
