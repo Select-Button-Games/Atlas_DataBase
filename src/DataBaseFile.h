@@ -1,3 +1,4 @@
+// DataBaseFile.h
 #pragma once
 #include <filesystem>
 #include <fstream>
@@ -9,9 +10,9 @@ namespace fs = std::filesystem;
 class DataBaseFile {
 public:
     // Save the database to a binary file
-    static void saveDatabase(const Database& db, const std::string& fileName) {
+    static void saveDatabase(const Database& db, const std::string& dbName, DatabaseManager& dbManager) {
         fs::path path = fs::current_path();
-        path /= fileName;
+        path /= dbName + ".db"; // Use the database name as the file name
         std::ofstream file(path, std::ios::binary);
         if (file.is_open()) {
             // Write the number of tables
@@ -67,6 +68,20 @@ public:
                             bool boolValue = std::get<bool>(value);
                             file.write(reinterpret_cast<const char*>(&boolValue), sizeof(boolValue));
                         }
+                        else if (std::holds_alternative<std::time_t>(value)) {
+                            std::time_t timestampValue = std::get<std::time_t>(value);
+                            file.write(reinterpret_cast<const char*>(&timestampValue), sizeof(timestampValue));
+                        }
+                        else if (std::holds_alternative<float>(value)) {
+                            float floatValue = std::get<float>(value);
+                            file.write(reinterpret_cast<const char*>(&floatValue), sizeof(floatValue));
+                        }
+                        else if (std::holds_alternative<std::vector<uint8_t>>(value)) {
+                            const std::vector<uint8_t>& blobValue = std::get<std::vector<uint8_t>>(value);
+                            size_t blobSize = blobValue.size();
+                            file.write(reinterpret_cast<const char*>(&blobSize), sizeof(blobSize));
+                            file.write(reinterpret_cast<const char*>(blobValue.data()), blobSize);
+                        }
                     }
                 }
             }
@@ -74,11 +89,10 @@ public:
         }
     }
 
-    // Load the database from a binary file
-    static Database loadDatabase(const std::string& fileName) {
+    static Database loadDatabase(const std::string& dbName, DatabaseManager& dbManager) {
         Database db;
         fs::path path = fs::current_path();
-        path /= fileName;
+        path /= dbName + ".db"; // Use the database name as the file name
         std::ifstream file(path, std::ios::binary);
         if (file.is_open()) {
             size_t numTables = 0;
@@ -155,8 +169,28 @@ public:
                             file.read(reinterpret_cast<char*>(&boolValue), sizeof(boolValue));
                             row.addData(column.name, boolValue);
                         }
+                        else if (column.type == DataType::TIMESTAMP) {
+                            std::time_t timestampValue;
+                            file.read(reinterpret_cast<char*>(&timestampValue), sizeof(timestampValue));
+                            row.addData(column.name, timestampValue);
+                        }
+                        else if (column.type == DataType::FLOAT) {
+                            float floatValue;
+                            file.read(reinterpret_cast<char*>(&floatValue), sizeof(floatValue));
+                            row.addData(column.name, floatValue);
+                        }
+                        else if (column.type == DataType::BLOB) {
+                            size_t blobSize = 0;
+                            file.read(reinterpret_cast<char*>(&blobSize), sizeof(blobSize));
+                            if (blobSize > 1000000) { // Arbitrary large value check
+                                throw std::runtime_error("Invalid blob value size.");
+                            }
+                            std::vector<uint8_t> blobValue(blobSize);
+                            file.read(reinterpret_cast<char*>(blobValue.data()), blobSize);
+                            row.addData(column.name, blobValue);
+                        }
                     }
-                    table.addRow(row);
+                    table.addRow(row, dbManager); // Pass the DatabaseManager reference here
                 }
 
                 db.addTable(table);

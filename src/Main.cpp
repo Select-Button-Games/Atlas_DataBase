@@ -8,6 +8,8 @@
 #include "Database.h"
 #include "DataBaseFile.h"
 #include <iostream>
+#include <iomanip>
+
 
 void printDatabase(const Database& db) {
     for (const auto& tablePair : db.tables) {
@@ -33,11 +35,29 @@ void printDatabase(const Database& db) {
                 else if (std::holds_alternative<bool>(value)) {
                     std::cout << (std::get<bool>(value) ? "true" : "false") << "\t";
                 }
+                else if (std::holds_alternative<std::time_t>(value)) {
+                    std::time_t timestamp = std::get<std::time_t>(value);
+                    std::tm tm;
+                    localtime_s(&tm, &timestamp);
+                    std::cout << std::put_time(&tm, "%Y-%m-%d %H:%M:%S") << "\t";
+                }
+                else if (std::holds_alternative<float>(value)) {
+                    std::cout << std::get<float>(value) << "\t";
+                }
+                else if (std::holds_alternative<std::vector<uint8_t>>(value)) {
+                    const auto& blob = std::get<std::vector<uint8_t>>(value);
+                    std::cout << "0x";
+                    for (uint8_t byte : blob) {
+                        std::cout << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(byte);
+                    }
+                    std::cout << "\t";
+                }
             }
             std::cout << std::endl;
         }
     }
 }
+
 
 std::string getPassword() {
     std::string password;
@@ -104,7 +124,7 @@ int main() {
     // Load the database from a file if it exists
     const std::string dbFileName = "database.bin";
     if (std::filesystem::exists(dbFileName)) {
-        dbManager.databases["TestDB"] = DataBaseFile::loadDatabase(dbFileName);
+        dbManager.databases["TestDB"] = DataBaseFile::loadDatabase(dbFileName,dbManager);
         dbManager.selectDatabase("TestDB");
     }
 
@@ -122,7 +142,7 @@ int main() {
 
     // Save the database to a file after operations
     if (dbManager.getCurrentDatabase()) {
-        DataBaseFile::saveDatabase(*dbManager.getCurrentDatabase(), dbFileName);
+        DataBaseFile::saveDatabase(*dbManager.getCurrentDatabase(), dbFileName,dbManager);
     }
 
     return 0;

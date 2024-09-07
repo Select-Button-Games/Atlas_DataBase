@@ -1,0 +1,14 @@
+CREATE DATABASE ComplexDB;
+USE ComplexDB;
+ADD TABLE Projects (ProjectID INT PRIMARY KEY, ProjectName STRING, StartDate TIMESTAMP, Budget FLOAT);
+ADD TABLE Employees (EmpID INT PRIMARY KEY, EmpName STRING, Role STRING, Salary FLOAT, DeptID INT REFERENCES Departments(DeptID));
+ADD TABLE Departments (DeptID INT PRIMARY KEY, DeptName STRING);
+ADD TABLE ProjectAssignments (AssignmentID INT PRIMARY KEY, ProjectID INT REFERENCES Projects(ProjectID), EmpID INT REFERENCES Employees(EmpID), AssignmentDate TIMESTAMP);
+INSERT INTO Projects (ProjectID, ProjectName, StartDate, Budget) VALUES (1, 'Project Alpha', 1672531200, 100000.00);
+INSERT INTO Projects (ProjectID, ProjectName, StartDate, Budget) VALUES (2, 'Project Beta', 1672617600, 200000.00);
+INSERT INTO Departments (DeptID, DeptName) VALUES (1, 'Research');
+INSERT INTO Departments (DeptID, DeptName) VALUES (2, 'Development');
+INSERT INTO Employees (EmpID, EmpName, Role, Salary, DeptID) VALUES (1, 'Alice Johnson', 'Lead Researcher', 90000.00, 1);
+INSERT INTO Employees (EmpID, EmpName, Role, Salary, DeptID) VALUES (2, 'Bob Brown', 'Developer', 80000.00, 2);
+INSERT INTO ProjectAssignments (AssignmentID, ProjectID, EmpID, AssignmentDate) VALUES (1, 1, 1, 1672704000);
+INSERT INTO ProjectAssignments (AssignmentID, ProjectID, EmpID, AssignmentDate) VALUES (2, 2, 2, 1672790400);

@@ -4,25 +4,23 @@
 #include <map>
 #include <vector>
 #include <variant>
+#include <optional>
+#include <ctime> // Include for std::time_t
+
+class DatabaseManager; // Forward declaration
 
 /////////////////////////////////////////////////////////////////////////////////
 ///////////RELATIONAL DATABASE EDUCATIONAL ONLY ////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
-
-/*
-    Coded by: Andrew "AJ"
-    Date: 8/31/2024
-    Desc of project:
-
-    Relational Database similar to MySQL but connectionless.
-    Simple CRUD(create, read, update, delete) operations.
-*/
 
 // Data type enum
 enum class DataType {
     INT,
     STRING,
     BOOL,
+    TIMESTAMP,
+    FLOAT,
+    BLOB
 };
 
 // Forward declare the Table class
@@ -41,13 +39,13 @@ public:
 // Row class that will describe our rows inside the database
 class Row {
 public:
-    std::map<std::string, std::variant<int, std::string, bool>> data;
+    std::map<std::string, std::variant<int, std::string, bool, std::time_t, float, std::vector<uint8_t>>> data;
 
-    void addData(const std::string& columnName, const std::variant<int, std::string, bool>& value) {
+    void addData(const std::string& columnName, const std::variant<int, std::string, bool, std::time_t, float, std::vector<uint8_t>>& value) {
         data[columnName] = value;
     }
 
-    std::variant<int, std::string, bool> getData(const std::string& columnName) const {
+    std::variant<int, std::string, bool, std::time_t, float, std::vector<uint8_t>> getData(const std::string& columnName) const {
         auto it = data.find(columnName);
         if (it != data.end()) {
             return it->second;
@@ -55,15 +53,34 @@ public:
         return {};
     }
 };
+
+class ForeignKey {
+public:
+    std::string referencedTable;
+    std::string referencedColumn;
+
+    ForeignKey(const std::string& refTable, const std::string& refColumn)
+        : referencedTable(refTable), referencedColumn(refColumn) {}
+};
+
 // Column class that will describe our Columns within the database
 class Column {
 public:
     std::string name;
     DataType type;
-    bool isPrimaryKey; // Add this flag
+    bool isPrimaryKey;
+    std::optional<ForeignKey> foreignKey;
 
-    Column(const std::string& name, DataType type, bool isPrimaryKey = false)
-        : name(name), type(type), isPrimaryKey(isPrimaryKey) {}
+    void setPrimaryKey(bool isPrimaryKey) {
+		this->isPrimaryKey = isPrimaryKey;
+	}
+
+    void setForeignKey(const std::string& refTable, const std::string& refColumn) {
+        foreignKey = ForeignKey(refTable, refColumn);
+    }
+
+    Column(const std::string& name, DataType type, bool isPrimaryKey = false, std::optional<ForeignKey> foreignKey = std::nullopt)
+        : name(name), type(type), isPrimaryKey(isPrimaryKey), foreignKey(foreignKey) {}
 };
 
 // Table class that will describe our tables within the database
@@ -91,7 +108,7 @@ public:
         columns.push_back(column);
     }
 
-    void addRow(const Row& row);
+    void addRow(const Row& row, DatabaseManager& dbManager); // Updated signature
 
     const Column* getPrimaryKey() const {
         for (const auto& column : columns) {
@@ -111,6 +128,7 @@ public:
         return nullptr;
     }
 };
+
 // Implementations of Database member functions
 void Database::addTable(const Table& table) {
     tables[table.name] = table;
@@ -151,8 +169,7 @@ public:
     }
 };
 
-
-void Table::addRow(const Row& row) {
+void Table::addRow(const Row& row, DatabaseManager& dbManager) { // Updated signature
     const Column* primaryKey = getPrimaryKey();
     if (primaryKey) {
         auto primaryKeyValue = row.getData(primaryKey->name);
@@ -162,5 +179,31 @@ void Table::addRow(const Row& row) {
             }
         }
     }
+    for (const auto& column : columns) {
+        if (column.foreignKey) {
+            const auto& fk = column.foreignKey.value();
+            Database* db = dbManager.getCurrentDatabase();
+            Table* refTable = db->getTable(fk.referencedTable);
+            if (!refTable) {
+                throw std::runtime_error("Referenced table not found.");
+            }
+            const Column* refColumn = refTable->getColumn(fk.referencedColumn);
+            if (!refColumn) {
+                throw std::runtime_error("Referenced column not found.");
+            }
+            auto refValue = row.getData(column.name);
+            bool found = false;
+            for (const auto& refRow : refTable->rows) {
+                if (refRow.getData(fk.referencedColumn) == refValue) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                throw std::runtime_error("Foreign key constraint violation.");
+            }
+        }
+    }
+
     rows.push_back(row);
 }
