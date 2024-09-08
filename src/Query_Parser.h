@@ -34,27 +34,21 @@ bool QueryParser::executeCommand(const std::string& command) {
         std::smatch match;
         std::string trimmedCommand = std::regex_replace(singleCommand, std::regex("^ +| +$|( ) +"), "$1"); // Trim spaces
 
-        std::cout << "Executing command: " << trimmedCommand << std::endl; // Debugging
 
         try {
             if (std::regex_match(trimmedCommand, match, std::regex(R"(CREATE DATABASE (\w+))"))) {
-                std::cout << "Matched CREATE DATABASE command." << std::endl; // Debugging
                 allCommandsSuccessful &= parseCreateDatabase(trimmedCommand);
             }
             else if (std::regex_match(trimmedCommand, match, std::regex(R"(USE (\w+))"))) {
-                std::cout << "Matched USE command." << std::endl; // Debugging
                 allCommandsSuccessful &= parseUseDatabase(trimmedCommand);
             }
             else if (std::regex_match(trimmedCommand, match, std::regex(R"(ADD TABLE (\w+) \((.*)\))"))) {
-                std::cout << "Matched ADD TABLE command." << std::endl; // Debugging
                 allCommandsSuccessful &= parseAddTable(trimmedCommand);
             }
             else if (std::regex_match(trimmedCommand, match, std::regex(R"(INSERT INTO (\w+) \(([^)]+)\) VALUES \(([^)]+)\))"))) {
-                std::cout << "Matched INSERT INTO command." << std::endl; // Debugging
                 allCommandsSuccessful &= parseInsertInto(trimmedCommand);
             }
             else if (std::regex_match(trimmedCommand, match, std::regex(R"(REMOVE FROM (\w+) WHERE (\w+) = (.+))"))) {
-                std::cout << "Matched REMOVE FROM command." << std::endl; // Debugging
                 allCommandsSuccessful &= parseRemoveRow(trimmedCommand);
             }
             else {
@@ -78,7 +72,7 @@ bool QueryParser::parseCreateDatabase(const std::string& command) {
     std::smatch match;
     std::regex_match(command, match, std::regex(R"(CREATE DATABASE (\w+))"));
     std::string dbName = match[1];
-    std::cout << "Creating database: " << dbName << std::endl; // Debugging
+  
     dbManager.createDatabase(dbName);
     return true;
 }
@@ -87,7 +81,7 @@ bool QueryParser::parseUseDatabase(const std::string& command) {
     std::smatch match;
     std::regex_match(command, match, std::regex(R"(USE (\w+))"));
     std::string dbName = match[1];
-    std::cout << "Using database: " << dbName << std::endl; // Debugging
+
     return dbManager.selectDatabase(dbName);
 }
 
@@ -107,7 +101,6 @@ bool QueryParser::parseAddTable(const std::string& command) {
     std::string tableName = match[1].str();
     std::string columnsStr = match[2].str();
 
-    std::cout << "Adding table: " << tableName << " with columns: " << columnsStr << std::endl; // Debugging
 
     Table table(tableName);
     std::istringstream columnsStream(columnsStr);
@@ -127,10 +120,7 @@ bool QueryParser::parseAddTable(const std::string& command) {
             std::string columnTypeStr = columnMatch[2].str();
             std::string attributes = columnMatch[3].str();
 
-            std::cout << "Column definition: " << columnDef << std::endl; // Debugging
-            std::cout << "Column name: " << columnName << ", Type: " << columnTypeStr
-                << ", Attributes: " << attributes << std::endl; // Debugging
-
+          
             // Identify the column type
             DataType columnType;
             if (columnTypeStr == "INT") {
@@ -159,11 +149,13 @@ bool QueryParser::parseAddTable(const std::string& command) {
             Column column(columnName, columnType);
 
             // Check for PRIMARY_KEY attribute
-            if (attributes.find("PRIMARY_KEY") != std::string::npos) {
+            std::smatch primaryKeyMatch;
+            std::regex primaryKeyRegex(R"(PRIMARY_KEY)");
+            if (std::regex_search(attributes, primaryKeyMatch, primaryKeyRegex)) {
                 column.setPrimaryKey(true);
                 std::cout << "Column " << columnName << " is a primary key." << std::endl;
 
-                // Initialize BTree for the primary key
+                // Initialize BTree for the primary key (assuming only one primary key)
                 table.setPrimaryKeyBTree(new BTree<std::variant<int, std::string, bool, time_t, float, std::vector<uint8_t>>>(3));
             }
 
@@ -302,6 +294,8 @@ bool QueryParser::parseRemoveRow(const std::string& command) {
     std::string primaryKeyColumn = match[2];
     std::string value = match[3];
 
+    std::cout << "Removing from table: " << tableName << " where " << primaryKeyColumn << " = " << value << std::endl; // Debugging
+
     Table* table = dbManager.getCurrentDatabase()->getTable(tableName);
     if (!table) {
         std::cerr << "Table not found: " << tableName << std::endl;
@@ -309,7 +303,14 @@ bool QueryParser::parseRemoveRow(const std::string& command) {
     }
 
     const Column* column = table->getColumn(primaryKeyColumn);
-    if (!column || !column->isPrimaryKey) {
+    if (!column) {
+        std::cerr << "Column not found: " << primaryKeyColumn << std::endl;
+        return false;
+    }
+
+    std::cout << "Column found: " << primaryKeyColumn << ", isPrimaryKey: " << column->isPrimaryKey << std::endl; // Debugging
+
+    if (!column->isPrimaryKey) {
         std::cerr << "Primary key column not found: " << primaryKeyColumn << std::endl;
         return false;
     }
