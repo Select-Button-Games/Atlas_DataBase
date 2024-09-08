@@ -21,6 +21,8 @@ private:
     bool parseUseDatabase(const std::string& command);
     bool parseAddTable(const std::string& command);
     bool parseInsertInto(const std::string& command);
+    bool parseRemoveRow(const std::string& command);
+    bool parseUpdateRow(const std::string& command);
 };
 
 bool QueryParser::executeCommand(const std::string& command) {
@@ -32,24 +34,22 @@ bool QueryParser::executeCommand(const std::string& command) {
         std::smatch match;
         std::string trimmedCommand = std::regex_replace(singleCommand, std::regex("^ +| +$|( ) +"), "$1"); // Trim spaces
 
-        std::cout << "Executing command: " << trimmedCommand << std::endl; // Debugging
 
         try {
             if (std::regex_match(trimmedCommand, match, std::regex(R"(CREATE DATABASE (\w+))"))) {
-                std::cout << "Matched CREATE DATABASE command." << std::endl; // Debugging
                 allCommandsSuccessful &= parseCreateDatabase(trimmedCommand);
             }
             else if (std::regex_match(trimmedCommand, match, std::regex(R"(USE (\w+))"))) {
-                std::cout << "Matched USE command." << std::endl; // Debugging
                 allCommandsSuccessful &= parseUseDatabase(trimmedCommand);
             }
             else if (std::regex_match(trimmedCommand, match, std::regex(R"(ADD TABLE (\w+) \((.*)\))"))) {
-                std::cout << "Matched ADD TABLE command." << std::endl; // Debugging
                 allCommandsSuccessful &= parseAddTable(trimmedCommand);
             }
             else if (std::regex_match(trimmedCommand, match, std::regex(R"(INSERT INTO (\w+) \(([^)]+)\) VALUES \(([^)]+)\))"))) {
-                std::cout << "Matched INSERT INTO command." << std::endl; // Debugging
                 allCommandsSuccessful &= parseInsertInto(trimmedCommand);
+            }
+            else if (std::regex_match(trimmedCommand, match, std::regex(R"(REMOVE FROM (\w+) WHERE (\w+) = (.+))"))) {
+                allCommandsSuccessful &= parseRemoveRow(trimmedCommand);
             }
             else {
                 std::cerr << "Command not recognized: " << trimmedCommand << std::endl; // Debugging
@@ -67,11 +67,12 @@ bool QueryParser::executeCommand(const std::string& command) {
 
 
 
+
 bool QueryParser::parseCreateDatabase(const std::string& command) {
     std::smatch match;
     std::regex_match(command, match, std::regex(R"(CREATE DATABASE (\w+))"));
     std::string dbName = match[1];
-    std::cout << "Creating database: " << dbName << std::endl; // Debugging
+  
     dbManager.createDatabase(dbName);
     return true;
 }
@@ -80,7 +81,7 @@ bool QueryParser::parseUseDatabase(const std::string& command) {
     std::smatch match;
     std::regex_match(command, match, std::regex(R"(USE (\w+))"));
     std::string dbName = match[1];
-    std::cout << "Using database: " << dbName << std::endl; // Debugging
+
     return dbManager.selectDatabase(dbName);
 }
 
@@ -100,7 +101,6 @@ bool QueryParser::parseAddTable(const std::string& command) {
     std::string tableName = match[1].str();
     std::string columnsStr = match[2].str();
 
-    std::cout << "Adding table: " << tableName << " with columns: " << columnsStr << std::endl; // Debugging
 
     Table table(tableName);
     std::istringstream columnsStream(columnsStr);
@@ -120,10 +120,7 @@ bool QueryParser::parseAddTable(const std::string& command) {
             std::string columnTypeStr = columnMatch[2].str();
             std::string attributes = columnMatch[3].str();
 
-            std::cout << "Column definition: " << columnDef << std::endl; // Debugging
-            std::cout << "Column name: " << columnName << ", Type: " << columnTypeStr
-                << ", Attributes: " << attributes << std::endl; // Debugging
-
+          
             // Identify the column type
             DataType columnType;
             if (columnTypeStr == "INT") {
@@ -152,9 +149,14 @@ bool QueryParser::parseAddTable(const std::string& command) {
             Column column(columnName, columnType);
 
             // Check for PRIMARY_KEY attribute
-            if (attributes.find("PRIMARY_KEY") != std::string::npos) {
+            std::smatch primaryKeyMatch;
+            std::regex primaryKeyRegex(R"(PRIMARY_KEY)");
+            if (std::regex_search(attributes, primaryKeyMatch, primaryKeyRegex)) {
                 column.setPrimaryKey(true);
                 std::cout << "Column " << columnName << " is a primary key." << std::endl;
+
+                // Initialize BTree for the primary key (assuming only one primary key)
+                table.setPrimaryKeyBTree(new BTree<std::variant<int, std::string, bool, time_t, float, std::vector<uint8_t>>>(3));
             }
 
             // Check for REFERENCES attribute (foreign key)
@@ -221,28 +223,45 @@ bool QueryParser::parseInsertInto(const std::string& command) {
 
         auto* column = table->getColumn(colName);
         if (!column) {
-            std::cout << "Column not found: " << colName << std::endl; // Debugging
+            std::cout << "Column not found: " << colName << std::endl;
             return false;
         }
 
+        std::variant<int, std::string, bool, time_t, float, std::vector<uint8_t>> key;
+
         if (column->type == DataType::INT) {
-            row.addData(colName, std::stoi(value));
+            int intValue = std::stoi(value);
+            row.addData(colName, intValue);
+            key = intValue;
         }
         else if (column->type == DataType::STRING) {
             row.addData(colName, value);
+            key = value;
         }
         else if (column->type == DataType::BOOL) {
-            row.addData(colName, value == "true");
+            bool boolValue = (value == "true");
+            row.addData(colName, boolValue);
+            key = boolValue;
         }
         else if (column->type == DataType::TIMESTAMP) {
-            std::time_t timestamp = std::stoll(value);
+            time_t timestamp = std::stoll(value);
+            row.addData(colName, timestamp);
+            key = timestamp;
         }
         else if (column->type == DataType::FLOAT) {
-            row.addData(colName, std::stof(value));
+            float floatValue = std::stof(value);
+            row.addData(colName, floatValue);
+            key = floatValue;
         }
         else if (column->type == DataType::BLOB) {
             std::vector<uint8_t> blob(value.begin(), value.end());
             row.addData(colName, blob);
+            key = blob;
+        }
+
+        
+        if (column->isPrimaryKey) {
+            table->getPrimaryKeyBTree()->insert(key);
         }
     }
 
@@ -257,3 +276,174 @@ bool QueryParser::parseInsertInto(const std::string& command) {
     return true;
 }
 
+//using Table::deleteRow
+bool QueryParser::parseRemoveRow(const std::string& command) {
+    if (!dbManager.getCurrentDatabase()) {
+        std::cout << "No database selected" << std::endl; // Debugging
+        return false;
+    }
+
+    std::smatch match;
+    std::regex removeRegex(R"(REMOVE FROM (\w+) WHERE (\w+) = (.+))");
+    if (!std::regex_match(command, match, removeRegex)) {
+        std::cerr << "Failed to parse REMOVE command: " << command << std::endl;
+        return false;
+    }
+
+    std::string tableName = match[1];
+    std::string primaryKeyColumn = match[2];
+    std::string value = match[3];
+
+    std::cout << "Removing from table: " << tableName << " where " << primaryKeyColumn << " = " << value << std::endl; // Debugging
+
+    Table* table = dbManager.getCurrentDatabase()->getTable(tableName);
+    if (!table) {
+        std::cerr << "Table not found: " << tableName << std::endl;
+        return false;
+    }
+
+    const Column* column = table->getColumn(primaryKeyColumn);
+    if (!column) {
+        std::cerr << "Column not found: " << primaryKeyColumn << std::endl;
+        return false;
+    }
+
+    std::cout << "Column found: " << primaryKeyColumn << ", isPrimaryKey: " << column->isPrimaryKey << std::endl; // Debugging
+
+    if (!column->isPrimaryKey) {
+        std::cerr << "Primary key column not found: " << primaryKeyColumn << std::endl;
+        return false;
+    }
+
+    std::variant<int, std::string, bool, time_t, float, std::vector<uint8_t>> key;
+    if (column->type == DataType::INT) {
+        key = std::stoi(value);
+    }
+    else if (column->type == DataType::STRING) {
+        key = value;
+    }
+    else if (column->type == DataType::BOOL) {
+        key = (value == "true");
+    }
+    else if (column->type == DataType::TIMESTAMP) {
+        key = std::stoll(value);
+    }
+    else if (column->type == DataType::FLOAT) {
+        key = std::stof(value);
+    }
+    else if (column->type == DataType::BLOB) {
+        key = std::vector<uint8_t>(value.begin(), value.end());
+    }
+
+    try {
+        table->deleteRow(key);
+    }
+    catch (const std::runtime_error& e) {
+        std::cerr << "Error deleting row: " << e.what() << std::endl;
+        return false;
+    }
+
+    return true;
+}
+
+//using Table::updateRow
+bool QueryParser::parseUpdateRow(const std::string& command) {
+    if (!dbManager.getCurrentDatabase()) {
+        std::cout << "No database selected" << std::endl; // Debugging
+        return false;
+    }
+
+    std::smatch match;
+    std::regex updateRegex(R"(UPDATE (\w+) SET (.+) WHERE (\w+) = (.+))");
+    if (!std::regex_match(command, match, updateRegex)) {
+        std::cerr << "Failed to parse UPDATE command: " << command << std::endl;
+        return false;
+    }
+
+    std::string tableName = match[1];
+    std::string setClause = match[2];
+    std::string primaryKeyColumn = match[3];
+    std::string primaryKeyValue = match[4];
+
+    Table* table = dbManager.getCurrentDatabase()->getTable(tableName);
+    if (!table) {
+        std::cerr << "Table not found: " << tableName << std::endl;
+        return false;
+    }
+
+    const Column* column = table->getColumn(primaryKeyColumn);
+    if (!column || !column->isPrimaryKey) {
+        std::cerr << "Primary key column not found: " << primaryKeyColumn << std::endl;
+        return false;
+    }
+
+    std::variant<int, std::string, bool, time_t, float, std::vector<uint8_t>> oldPrimaryKey;
+    if (column->type == DataType::INT) {
+        oldPrimaryKey = std::stoi(primaryKeyValue);
+    }
+    else if (column->type == DataType::STRING) {
+        oldPrimaryKey = primaryKeyValue;
+    }
+    else if (column->type == DataType::BOOL) {
+        oldPrimaryKey = (primaryKeyValue == "true");
+    }
+    else if (column->type == DataType::TIMESTAMP) {
+        oldPrimaryKey = std::stoll(primaryKeyValue);
+    }
+    else if (column->type == DataType::FLOAT) {
+        oldPrimaryKey = std::stof(primaryKeyValue);
+    }
+    else if (column->type == DataType::BLOB) {
+        oldPrimaryKey = std::vector<uint8_t>(primaryKeyValue.begin(), primaryKeyValue.end());
+    }
+
+    Row newRow;
+    std::istringstream setStream(setClause);
+    std::string setPart;
+    while (std::getline(setStream, setPart, ',')) {
+        std::smatch setMatch;
+        std::regex setRegex(R"((\w+) = (.+))");
+        if (!std::regex_match(setPart, setMatch, setRegex)) {
+            std::cerr << "Failed to parse SET clause: " << setPart << std::endl;
+            return false;
+        }
+
+        std::string colName = setMatch[1];
+        std::string value = setMatch[2];
+
+        const Column* col = table->getColumn(colName);
+        if (!col) {
+            std::cerr << "Column not found: " << colName << std::endl;
+            return false;
+        }
+
+        if (col->type == DataType::INT) {
+            newRow.addData(colName, std::stoi(value));
+        }
+        else if (col->type == DataType::STRING) {
+            newRow.addData(colName, value);
+        }
+        else if (col->type == DataType::BOOL) {
+            newRow.addData(colName, (value == "true"));
+        }
+        else if (col->type == DataType::TIMESTAMP) {
+            newRow.addData(colName, std::stoll(value));
+        }
+        else if (col->type == DataType::FLOAT) {
+            newRow.addData(colName, std::stof(value));
+        }
+        else if (col->type == DataType::BLOB) {
+            newRow.addData(colName, std::vector<uint8_t>(value.begin(), value.end()));
+        }
+    }
+
+    try {
+        table->updateRow(oldPrimaryKey, newRow);
+    }
+    catch (const std::runtime_error& e) {
+        std::cerr << "Error updating row: " << e.what() << std::endl;
+        return false;
+    }
+
+    return true;
+}

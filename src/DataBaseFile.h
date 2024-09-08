@@ -42,6 +42,13 @@ public:
 
                     bool isPrimaryKey = column.isPrimaryKey;
                     file.write(reinterpret_cast<const char*>(&isPrimaryKey), sizeof(isPrimaryKey));
+
+                    // Write the B-tree index if it exists
+                    bool hasIndex = column.index != nullptr;
+                    file.write(reinterpret_cast<const char*>(&hasIndex), sizeof(hasIndex));
+                    if (hasIndex) {
+                        column.index->serialize(file);
+                    }
                 }
 
                 // Write the number of rows
@@ -138,7 +145,17 @@ public:
                     file.read(reinterpret_cast<char*>(&isPrimaryKey), sizeof(isPrimaryKey));
                     std::cout << "Is primary key: " << isPrimaryKey << std::endl;
 
-                    table.addColumn(Column(columnName, columnType, isPrimaryKey));
+                    Column column(columnName, columnType, isPrimaryKey);
+
+                    // Read the B-tree index if it exists
+                    bool hasIndex;
+                    file.read(reinterpret_cast<char*>(&hasIndex), sizeof(hasIndex));
+                    if (hasIndex) {
+                        column.index = std::make_unique<BTree<std::variant<int, std::string, bool, std::time_t, float, std::vector<uint8_t>>>>();
+                        column.index->deserialize(file);
+                    }
+
+                    table.addColumn(column);
                 }
 
                 // Read the number of rows
@@ -199,5 +216,4 @@ public:
         }
         return db;
     }
-
 };
